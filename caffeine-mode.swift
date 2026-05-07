@@ -14,23 +14,14 @@ struct CaffeineModeApp: App {
     }
 }
 
-// MARK: - Backend
-
-enum CaffeineBackend {
-    case caffeinate(args: [String])
-    case pmset
-}
-
 // MARK: - Mode
 
 enum CaffeineMode: CaseIterable, Equatable {
-    case clamshell
     case longRuns
     case mlTraining
 
     var title: String {
         switch self {
-        case .clamshell:  return "Clamshell w/o AC"
         case .longRuns:   return "Long Runs"
         case .mlTraining: return "ML Training"
         }
@@ -38,28 +29,20 @@ enum CaffeineMode: CaseIterable, Equatable {
 
     var color: NSColor {
         switch self {
-        case .clamshell:  return NSColor(red: 0.2, green: 0.8, blue: 0.2, alpha: 1.0)
         case .longRuns:   return NSColor(red: 1.0, green: 0.8, blue: 0.0, alpha: 1.0)
         case .mlTraining: return NSColor(red: 1.0, green: 0.2, blue: 0.2, alpha: 1.0)
         }
     }
 
-    var backend: CaffeineBackend {
+    var args: [String] {
         switch self {
-        case .clamshell:  return .pmset
-        case .longRuns:   return .caffeinate(args: ["-di"])
-        case .mlTraining: return .caffeinate(args: ["-dim"])
+        case .longRuns:   return ["-di"]
+        case .mlTraining: return ["-dim"]
         }
-    }
-
-    var requiresWarning: Bool {
-        self == .clamshell
     }
 
     var tooltip: String {
         switch self {
-        case .clamshell:
-            return "pmset -a disablesleep 1\nKeeps your Mac awake when lid is closed and no AC is connected.\nBattery drains faster. Requires admin password."
         case .longRuns:
             return "caffeinate -di\nPrevents idle sleep and screen off.\nDisk may sleep.\nBest for long tasks needing screen active."
         case .mlTraining:
@@ -105,54 +88,6 @@ struct SettingsManager {
         } else {
             try SMAppService.mainApp.register()
         }
-    }
-}
-
-// MARK: - Sudoers
-
-enum SudoersManager {
-    static let filePath = "/etc/sudoers.d/caffeinemode"
-    private static let pmsetPath = "/usr/bin/pmset"
-
-    static func isConfigured(forUser username: String) -> Bool {
-        let expected = expectedLine(forUser: username)
-        guard let existing = try? String(contentsOfFile: filePath, encoding: .utf8) else { return false }
-        return existing.trimmingCharacters(in: .whitespacesAndNewlines) == expected.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    // Returns nil on success, error string on failure.
-    // MUST be called from a background thread — blocks while the macOS password dialog is open.
-    static func configure(forUser username: String) -> String? {
-        let line = expectedLine(forUser: username)
-        let shellCmd = """
-            printf '%s\\n' '\(line)' > /tmp/caffeinemode_sudoers \
-            && visudo -c -f /tmp/caffeinemode_sudoers \
-            && install -o root -g wheel -m 0440 /tmp/caffeinemode_sudoers \(filePath) \
-            && rm -f /tmp/caffeinemode_sudoers
-            """
-        let escaped = shellCmd.replacingOccurrences(of: "\"", with: "\\\"")
-        let script = "do shell script \"\(escaped)\" with administrator privileges"
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        process.arguments = ["-e", script]
-        let errPipe = Pipe()
-        process.standardError = errPipe
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-        } catch {
-            return "Could not launch osascript: \(error.localizedDescription)"
-        }
-
-        if process.terminationStatus == 0 { return nil }
-        let data = errPipe.fileHandleForReading.readDataToEndOfFile()
-        return String(data: data, encoding: .utf8) ?? "Unknown error (status \(process.terminationStatus))"
-    }
-
-    private static func expectedLine(forUser username: String) -> String {
-        "\(username) ALL=(ALL) NOPASSWD: \(pmsetPath)\n"
     }
 }
 
@@ -479,6 +414,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: Mode Actions
 
     func activate(mode: CaffeineMode) {
+        statusItem?.menu?.cancelTracking()
+
         if activeMode == mode {
             stopMode(silent: false)
             return
@@ -488,147 +425,31 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             stopMode(silent: true)
         }
 
-        if mode.requiresWarning && settings.showWarnings {
-            guard showWarningAlert(for: mode) else { return }
-        }
-
-        switch mode.backend {
-        case .pmset:
-            activateWithPmset(mode: mode)
-        case .caffeinate(let args):
-            activateWithCaffeinate(mode: mode, args: args)
-        }
-    }
-
-    func activateWithCaffeinate(mode: CaffeineMode, args: [String]) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/caffeinate")
-        process.arguments = args
+        process.arguments = mode.args
         do {
             try process.run()
             caffeineProcess = process
             activeMode = mode
             updateIcon(for: mode)
             updateModeViews()
-            showNotification(title: mode.title, subtitle: "caffeinate \(args.joined(separator: " "))")
+            showNotification(title: mode.title, subtitle: "caffeinate \(mode.args.joined(separator: " "))")
         } catch {
             showNotification(title: "Error", subtitle: "Could not start caffeinate")
         }
     }
 
-    func activateWithPmset(mode: CaffeineMode) {
-        let username = NSUserName()
-
-        if !SudoersManager.isConfigured(forUser: username) {
-            let alert = NSAlert()
-            alert.messageText = "Administrator Access Required"
-            alert.informativeText = """
-                CaffeineMode needs one-time access to configure passwordless \
-                'pmset' so you won't be prompted every time.
-
-                This writes one line to /etc/sudoers.d/caffeinemode:
-                  \(username) ALL=(ALL) NOPASSWD: /usr/bin/pmset
-
-                You will be asked for your administrator password once.
-                """
-            alert.addButton(withTitle: "Configure Access")
-            alert.addButton(withTitle: "Cancel")
-            alert.alertStyle = .informational
-
-            guard alert.runModal() == .alertFirstButtonReturn else { return }
-
-            // Block background thread — password dialog stays open until user responds
-            Task.detached(priority: .userInitiated) {
-                let error = SudoersManager.configure(forUser: username)
-                await MainActor.run {
-                    if let msg = error {
-                        let errAlert = NSAlert()
-                        errAlert.messageText = "Could Not Configure Access"
-                        errAlert.informativeText = msg.isEmpty ? "Setup was cancelled." : msg
-                        errAlert.alertStyle = .warning
-                        errAlert.runModal()
-                    } else {
-                        self.runPmsetAndFinalize(mode: mode, value: 1)
-                    }
-                }
-            }
-            return
-        }
-
-        runPmsetAndFinalize(mode: mode, value: 1)
-    }
-
-    func runPmsetAndFinalize(mode: CaffeineMode, value: Int) {
-        if let error = runSudoPmset(value: value) {
-            showNotification(title: "Error", subtitle: error)
-            return
-        }
-        activeMode = mode
-        updateIcon(for: mode)
-        updateModeViews()
-        showNotification(title: mode.title, subtitle: "sudo pmset -a disablesleep \(value)")
-    }
-
-    @discardableResult
-    func runSudoPmset(value: Int) -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
-        process.arguments = ["/usr/bin/pmset", "-a", "disablesleep", "\(value)"]
-        let errPipe = Pipe()
-        process.standardError = errPipe
-        do {
-            try process.run()
-            process.waitUntilExit()
-        } catch {
-            return "Could not run pmset: \(error.localizedDescription)"
-        }
-        if process.terminationStatus != 0 {
-            let data = errPipe.fileHandleForReading.readDataToEndOfFile()
-            return String(data: data, encoding: .utf8) ?? "pmset failed (status \(process.terminationStatus))"
-        }
-        return nil
-    }
-
     func stopMode(silent: Bool) {
         guard let mode = activeMode else { return }
-
-        switch mode.backend {
-        case .pmset:
-            let error = runSudoPmset(value: 0)
-            if let msg = error, !silent {
-                showNotification(title: "Error stopping mode", subtitle: msg)
-            }
-        case .caffeinate:
-            caffeineProcess?.terminate()
-            caffeineProcess = nil
-        }
-
+        caffeineProcess?.terminate()
+        caffeineProcess = nil
         activeMode = nil
         updateIcon(for: nil)
         updateModeViews()
-
         if !silent {
             showNotification(title: "\(mode.title) stopped", subtitle: "")
         }
-    }
-
-    // MARK: Warnings
-
-    func showWarningAlert(for mode: CaffeineMode) -> Bool {
-        let alert = NSAlert()
-        alert.messageText = "Warning: \(mode.title)"
-        alert.informativeText = {
-            switch mode {
-            case .clamshell:
-                return "This disables ALL system sleep. Battery will drain faster. Mac will not sleep even when the lid is closed."
-            default:
-                return ""
-            }
-        }()
-        alert.addButton(withTitle: "Activate")
-        alert.addButton(withTitle: "Cancel")
-        alert.alertStyle = .warning
-        return alert.runModal() == .alertFirstButtonReturn
     }
 
     // MARK: Settings Actions
@@ -657,52 +478,26 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func createCoffeeIcon(activeColor: NSColor?) -> NSImage {
-        let size = NSSize(width: 18, height: 18)
-        let image = NSImage(size: size)
-        image.lockFocus()
-
-        if let color = activeColor {
-            let body = NSBezierPath(roundedRect: NSRect(x: 2, y: 3, width: 11, height: 9), xRadius: 1.5, yRadius: 1.5)
-            color.setFill()
-            body.fill()
-
-            let handle = NSBezierPath()
-            handle.move(to: NSPoint(x: 13, y: 10))
-            handle.curve(to: NSPoint(x: 13, y: 5),
-                         controlPoint1: NSPoint(x: 17, y: 10),
-                         controlPoint2: NSPoint(x: 17, y: 5))
-            handle.lineWidth = 2
-            color.setStroke()
-            handle.stroke()
-
-            NSColor.white.withAlphaComponent(0.85).setStroke()
-            for xPos: CGFloat in [5.5, 9.0] {
-                let steam = NSBezierPath()
-                steam.move(to: NSPoint(x: xPos, y: 13))
-                steam.curve(to: NSPoint(x: xPos, y: 17),
-                            controlPoint1: NSPoint(x: xPos - 1.5, y: 14.5),
-                            controlPoint2: NSPoint(x: xPos + 1.5, y: 15.5))
-                steam.lineWidth = 1
-                steam.stroke()
-            }
-        } else {
-            NSColor.black.setStroke()
-            let body = NSBezierPath(roundedRect: NSRect(x: 2, y: 3, width: 11, height: 9), xRadius: 1.5, yRadius: 1.5)
-            body.lineWidth = 1.5
-            body.stroke()
-
-            let handle = NSBezierPath()
-            handle.move(to: NSPoint(x: 13, y: 10))
-            handle.curve(to: NSPoint(x: 13, y: 5),
-                         controlPoint1: NSPoint(x: 17, y: 10),
-                         controlPoint2: NSPoint(x: 17, y: 5))
-            handle.lineWidth = 1.5
-            handle.stroke()
+        let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular)
+        guard let base = NSImage(systemSymbolName: "cup.and.saucer.fill",
+                                 accessibilityDescription: nil)?
+                .withSymbolConfiguration(config) else {
+            return NSImage()
         }
 
-        image.unlockFocus()
-        image.isTemplate = (activeColor == nil)
-        return image
+        guard let color = activeColor else {
+            base.isTemplate = true
+            return base
+        }
+
+        let result = NSImage(size: base.size, flipped: false) { rect in
+            base.draw(in: rect)
+            color.setFill()
+            rect.fill(using: .sourceAtop)
+            return true
+        }
+        result.isTemplate = false
+        return result
     }
 
     // MARK: Notifications
