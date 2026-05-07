@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bash *)",
+      "Read(//Users/alejandro/Downloads/**)",
+      "Bash(sips *)"
+    ]
+  }
+}
