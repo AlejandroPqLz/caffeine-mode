@@ -1,8 +1,6 @@
-# CaffeineMode — Caffeinate Menu Bar macOS
+# caffeine-mode
 
-Minimal menu bar app to prevent macOS sleep with two configurable modes.
-
-> **Clamshell mode** (lid closed without AC) has been moved to its own app: [free-clamshell-mode](https://github.com/AlejandroPqLz/free-clamshell-mode)
+Minimal macOS menu bar app to prevent sleep with two configurable modes.
 
 ## Requirements
 
@@ -20,8 +18,6 @@ Output: `build/caffeine-mode.app`
 
 ## Install (optional)
 
-To run at login, copy to Applications:
-
 ```bash
 cp -r build/caffeine-mode.app ~/Applications/
 ```
@@ -31,41 +27,34 @@ Then open the app and enable **Settings > Launch at Login**.
 ## Usage
 
 1. Build and open the app
-2. Coffee icon appears in the menu bar
+2. Coffee cup icon (`cup.and.saucer.fill`) appears in the menu bar
 3. Click the icon to open the menu
+4. Click a mode to activate it — click again to stop
 
-### Modes
+The icon is tinted blue or orange while a mode is active. Hover over a mode to see a tooltip with the underlying command.
 
-| Mode | Command | Effect |
-|------|---------|--------|
-| **Long Runs** | `caffeinate -di` | Prevents idle sleep and screen off. Disk may sleep. |
-| **ML Training** | `caffeinate -dim` | Blocks all sleep: system, screen, and disk. |
+## Modes
 
-Clicking an active mode again stops it.
+| Mode | Command | Effect | Color |
+|------|---------|--------|-------|
+| **Long Runs** | `caffeinate -di` | Prevents idle sleep and display sleep. Disk may still sleep. | Blue |
+| **ML Training** | `caffeinate -dim` | Blocks all sleep: system, display, and disk. | Orange |
 
-### Colors
+Switching modes stops the current one and starts the new one immediately.
 
-- Yellow: Long Runs
-- Red: ML Training
-
-### Settings (Settings submenu)
+## Settings
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| Launch at Login | Off | Auto-start on login |
-| Hide from Dock | On | App only visible in menu bar and not in Force Quit |
+| Launch at Login | Off | Auto-start on login via `SMAppService` |
+| Hide from Dock | On | App appears only in the menu bar |
 
-## Dock visibility
+## Troubleshooting
 
-The app starts hidden from the Dock by default (`LSUIElement = true` in Info.plist). Toggle via **Settings > Hide from Dock**.
-
-If macOS blocks the app after a rebuild due to code signature mismatch, run once:
-
+**macOS blocks app after rebuild (code signature mismatch):**
 ```bash
 codesign --remove-signature build/caffeine-mode.app
 ```
-
-## Troubleshooting
 
 **"Permission denied":**
 ```bash
