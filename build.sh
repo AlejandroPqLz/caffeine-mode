@@ -1,22 +1,21 @@
 #!/bin/bash
 
-# Script compilación: CaffeineMode.app
-# Uso: bash build.sh
+# Build script: CaffeineMode.app
+# Usage: bash build.sh
 
 set -e
 
-echo "🔨 Compilando Caffeine Mode app..."
+echo "🔨 Building Caffeine Mode app..."
 
-# Directorio de compilación
 BUILD_DIR="build"
 APP_NAME="caffeine-mode"
 APP_BUNDLE="$BUILD_DIR/$APP_NAME.app"
 
-# Crear estructura
+# Create bundle structure
 mkdir -p "$APP_BUNDLE/Contents/MacOS"
 mkdir -p "$APP_BUNDLE/Contents/Resources"
 
-# Generar icono .icns
+# Generate .icns icon
 ICONSET="$BUILD_DIR/AppIcon.iconset"
 mkdir -p "$ICONSET"
 for size in 16 32 64 128 256 512; do
@@ -27,7 +26,7 @@ done
 iconutil -c icns "$ICONSET" -o "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
 rm -rf "$ICONSET"
 
-# Compilar Swift
+# Compile Swift
 swiftc -parse-as-library -o "$APP_BUNDLE/Contents/MacOS/$APP_NAME" caffeine-mode.swift
 
 # Crear Info.plist
@@ -68,8 +67,8 @@ cat > "$APP_BUNDLE/Contents/Info.plist" << 'EOF'
 </plist>
 EOF
 
-# Hacer ejecutable
+# Make executable
 chmod +x "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 
-echo "✅ App compilada: $APP_BUNDLE"
-echo "🚀 Para ejecutar: open $APP_BUNDLE"
+echo "✅ App built: $APP_BUNDLE"
+echo "🚀 To run: open $APP_BUNDLE"
