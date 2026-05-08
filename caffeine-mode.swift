@@ -29,8 +29,8 @@ enum CaffeineMode: CaseIterable, Equatable {
 
     var color: NSColor {
         switch self {
-        case .longRuns:   return NSColor(red: 1.0, green: 0.8, blue: 0.0, alpha: 1.0)
-        case .mlTraining: return NSColor(red: 1.0, green: 0.2, blue: 0.2, alpha: 1.0)
+        case .longRuns:   return NSColor(red: 0.2, green: 0.5, blue: 1.0, alpha: 1.0)
+        case .mlTraining: return NSColor(red: 1.0, green: 0.5, blue: 0.1, alpha: 1.0)
         }
     }
 
@@ -56,24 +56,17 @@ enum CaffeineMode: CaseIterable, Equatable {
 struct SettingsManager {
     private enum Key {
         static let hideFromDock = "hideFromDock"
-        static let showWarnings = "showWarnings"
     }
 
     static func registerDefaults() {
         UserDefaults.standard.register(defaults: [
             Key.hideFromDock: true,
-            Key.showWarnings: true,
         ])
     }
 
     var hideFromDock: Bool {
         get { UserDefaults.standard.bool(forKey: Key.hideFromDock) }
         set { UserDefaults.standard.set(newValue, forKey: Key.hideFromDock) }
-    }
-
-    var showWarnings: Bool {
-        get { UserDefaults.standard.bool(forKey: Key.showWarnings) }
-        set { UserDefaults.standard.set(newValue, forKey: Key.showWarnings) }
     }
 
     var isLaunchAtLoginEnabled: Bool {
@@ -189,7 +182,6 @@ class ToggleMenuItemView: NSView {
         needsDisplay = true
     }
 
-    // showSwitch: false for mode items (background shows state), true for settings items
     init(title: String, isOn: Bool, dotColor: NSColor? = nil,
          activeBackground: NSColor? = nil, showSwitch: Bool = true) {
         self.modeColor = activeBackground
@@ -205,6 +197,8 @@ class ToggleMenuItemView: NSView {
             sw.state = isOn ? .on : .off
             sw.target = self
             sw.action = #selector(switchChanged)
+            // Force active-window appearance so the accent color renders in the menu panel
+            sw.appearance = NSApp.effectiveAppearance
             sw.frame = NSRect(
                 x: Self.itemWidth - sw.frame.width - 12,
                 y: (Self.itemHeight - sw.frame.height) / 2,
@@ -239,7 +233,12 @@ class ToggleMenuItemView: NSView {
 
     required init?(coder: NSCoder) { fatalError() }
 
-    // MARK: Tracking
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        // Re-apply appearance once the view is in the menu window
+        toggleSwitch?.appearance = NSApp.effectiveAppearance
+        toggleSwitch?.needsDisplay = true
+    }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -249,19 +248,8 @@ class ToggleMenuItemView: NSView {
                                        owner: self, userInfo: nil))
     }
 
-    override func mouseEntered(with event: NSEvent) {
-        isHovered = true
-        needsDisplay = true
-        onHover?(true)
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        isHovered = false
-        needsDisplay = true
-        onHover?(false)
-    }
-
-    // MARK: Actions
+    override func mouseEntered(with event: NSEvent) { isHovered = true;  needsDisplay = true; onHover?(true) }
+    override func mouseExited(with event: NSEvent)  { isHovered = false; needsDisplay = true; onHover?(false) }
 
     @objc private func switchChanged() { onToggle?() }
 
@@ -276,12 +264,9 @@ class ToggleMenuItemView: NSView {
 
     override var mouseDownCanMoveWindow: Bool { false }
 
-    // MARK: Drawing
-
     override func draw(_ dirtyRect: NSRect) {
         let rect = bounds.insetBy(dx: 4, dy: 2)
         let path = NSBezierPath(roundedRect: rect, xRadius: 6, yRadius: 6)
-
         if let bg = activeBackground {
             bg.withAlphaComponent(0.30).setFill()
             path.fill()
@@ -400,8 +385,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         sub.addItem(toggleItem(title: "Launch at Login", isOn: settings.isLaunchAtLoginEnabled) { [weak self] in self?.toggleLaunchAtLogin() })
         sub.addItem(toggleItem(title: "Hide from Dock",  isOn: settings.hideFromDock)            { [weak self] in self?.toggleHideFromDock() })
-        sub.addItem(.separator())
-        sub.addItem(toggleItem(title: "Show Warnings",   isOn: settings.showWarnings)            { [weak self] in self?.toggleShowWarnings() })
 
         return sub
     }
@@ -465,10 +448,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc func toggleHideFromDock() {
         settings.hideFromDock.toggle()
         applyDockPolicy()
-    }
-
-    @objc func toggleShowWarnings() {
-        settings.showWarnings.toggle()
     }
 
     // MARK: Icon
